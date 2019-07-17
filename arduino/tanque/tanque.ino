@@ -1,24 +1,38 @@
 #include <AddrList.h>
+#include <ESP8266WebServer.h>
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
-#include <ESP8266WebServer.h>
 
 #ifndef APSSID
 #define APSSID "ESPap"
 #define APPSK "thereisnospoon"
 #endif
 
-/* Set these to your desired credentials. */
+// Set these to your desired credentials.
 const char *ssid = APSSID;
 const char *password = APPSK;
 
+// define pins
+const int ledPinOn = D1;
+const int ledPinHasConnections = D2;
+
 ESP8266WebServer server(80);
 
-/* Just a little test message.  Go to http://192.168.4.1 in a web browser
-   connected to this access point to see it.
-*/
+static void onStationModeConnected(const WiFiEventSoftAPModeStationConnected& event)
+{
+    Serial.print("conectado");
+    digitalWrite(ledPinHasConnections, HIGH);
+}
+
+static WiFiEventHandler onStationModeConnectedHandler;
+
+/*
+ * Just a little test message.  Go to http://192.168.4.1 in a web browser
+ * connected to this access point to see it.
+ */
 void handleRoot() {
-    server.send(200, "text/html", "<h1>You are connected</h1>");
+    // TODO: create form to change inteval
+    server.send(200, "text/html", "<h1>You are connected</h1><br />Use /config");
 }
 
 // preinit() is called before system startup
@@ -35,39 +49,31 @@ void preinit() {
 
 void setup() {
     Serial.begin(115200);
-    pinMode(D1, OUTPUT);
-    digitalWrite(D1, HIGH);
-    Serial.println("sleeping 5s");
+    // setup led indicators
+    pinMode(ledPinOn, OUTPUT);
+    pinMode(ledPinHasConnections, OUTPUT);
+    digitalWrite(ledPinOn, LOW);
+    digitalWrite(ledPinHasConnections, LOW);
 
-    // during this period, a simple amp meter shows
-    // an average of 20mA with a Wemos D1 mini
-    // a DSO is needed to check #2111
-    delay(5000);
+    // wait a bit
+    delay(2000);
 
-    Serial.print("Reason wake up: ");
-    Serial.println(ESP.getResetReason());
-    Serial.println(ESP.getResetReason() == "Power on");
-
-    Serial.println("waking WiFi up, sleeping 5s");
-    WiFi.forceSleepWake();
-
-    // amp meter raises to 75mA
-    delay(5000);
-
-    Serial.print("Configuring access point...");
-    /* You can remove the password parameter if you want the AP to be open. */
-    WiFi.softAP(ssid, password);
-
-    IPAddress myIP = WiFi.softAPIP();
-    Serial.print("AP IP address: ");
-    Serial.println(myIP);
-    server.on("/", handleRoot);
-    server.begin();
-    Serial.println("HTTP server started");
-
-    digitalWrite(D1, LOW);
-
-    ESP.deepSleep(5e6);
+    /**
+     * if the reset reasons was the power on or the external reset
+     * then start wifi and wait for connections, otherwise
+     * do the work without turning the wifi on
+     */
+    if (ESP.getResetReason() == "Power on" || ESP.getResetReason() == "External System") {
+        WiFi.forceSleepWake();
+        WiFi.softAP(ssid, password);
+        server.on("/", handleRoot);
+        server.begin();
+        digitalWrite(ledPinOn, HIGH);
+        onStationModeConnectedHandler = WiFi.onSoftAPModeStationConnected(onStationModeConnected);
+        // start waiting for connections
+    } else if (ESP.getResetReason() == "Deep-Sleep Wake") {
+        // TODO: do the work
+    }
 }
 
 void loop() { server.handleClient(); }
