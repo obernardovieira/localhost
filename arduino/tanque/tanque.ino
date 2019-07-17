@@ -11,20 +11,22 @@
 // Set these to your desired credentials.
 const char *ssid = APSSID;
 const char *password = APPSK;
+// webserver
+ESP8266WebServer server(80);
 
 // define pins
 const int ledPinOn = D1;
 const int ledPinHasConnections = D2;
 
-ESP8266WebServer server(80);
+// default interval is one second (should load from memory)
+int sleepInterval = 1;
 
-static void onStationModeConnected(const WiFiEventSoftAPModeStationConnected& event)
+// wait for stations to connect
+static void onSoftAPModeStationConnected(const WiFiEventSoftAPModeStationConnected& event)
 {
-    Serial.print("conectado");
     digitalWrite(ledPinHasConnections, HIGH);
 }
-
-static WiFiEventHandler onStationModeConnectedHandler;
+static WiFiEventHandler onSoftAPModeStationConnectedHandler;
 
 /*
  * Just a little test message.  Go to http://192.168.4.1 in a web browser
@@ -33,6 +35,26 @@ static WiFiEventHandler onStationModeConnectedHandler;
 void handleRoot() {
     // TODO: create form to change inteval
     server.send(200, "text/html", "<h1>You are connected</h1><br />Use /config");
+}
+
+// handle /config server call
+void handleConfig() {
+    if (server.hasArg("interval")) {
+        // change led state according to value sent
+        bool change_to = server.arg("led") == "1";
+        // TODO: write to memory
+        // response from server
+        server.send(200, "text/plain", "updated!");
+    } else {
+        server.send(400, "text/plain", "missing parameter!");
+    }
+}
+// handle /finish server call
+void handleFinish() {
+    digitalWrite(ledPinOn, LOW);
+    digitalWrite(ledPinHasConnections, HIGH);
+    server.send(200, "text/plain", "finishing...");
+    ESP.deepSleep(interval * 1000000);
 }
 
 // preinit() is called before system startup
@@ -48,7 +70,6 @@ void preinit() {
 }
 
 void setup() {
-    Serial.begin(115200);
     // setup led indicators
     pinMode(ledPinOn, OUTPUT);
     pinMode(ledPinHasConnections, OUTPUT);
@@ -67,12 +88,15 @@ void setup() {
         WiFi.forceSleepWake();
         WiFi.softAP(ssid, password);
         server.on("/", handleRoot);
+        server.on("/config", HTTP_GET, handleConfig);
+        server.on("/finish", HTTP_GET, handleFinish);
         server.begin();
         digitalWrite(ledPinOn, HIGH);
-        onStationModeConnectedHandler = WiFi.onSoftAPModeStationConnected(onStationModeConnected);
         // start waiting for connections
+        onSoftAPModeStationConnectedHandler = WiFi.onSoftAPModeStationConnected(onSoftAPModeStationConnected);
     } else if (ESP.getResetReason() == "Deep-Sleep Wake") {
         // TODO: do the work
+        // load interval from memory
     }
 }
 
