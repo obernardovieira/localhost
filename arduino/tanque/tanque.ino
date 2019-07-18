@@ -19,14 +19,40 @@ const int ledPinOn = D1;
 const int ledPinHasConnections = D2;
 
 // default interval is one second (should load from memory)
-int sleepInterval = 1;
+int sleepIntervalSet = false;
+// Structure which will be stored in RTC memory.
+// First field is CRC32, which is calculated based on the
+// rest of structure contents.
+// Any fields can go after CRC32.
+// We use byte array as an example.
+struct {
+    uint32_t crc32;
+    uint32_t interval;
+} rtcData;
 
 // wait for stations to connect
-static void onSoftAPModeStationConnected(const WiFiEventSoftAPModeStationConnected& event)
-{
+static void onSoftAPModeStationConnected(const WiFiEventSoftAPModeStationConnected &event) {
     digitalWrite(ledPinHasConnections, HIGH);
 }
 static WiFiEventHandler onSoftAPModeStationConnectedHandler;
+
+uint32_t calculateCRC32(const uint32_t *data, size_t length) {
+    uint32_t crc = 0xffffffff;
+    while (length--) {
+        uint32_t c = *data++;
+        for (uint32_t i = 0x80; i > 0; i >>= 1) {
+            bool bit = crc & 0x80000000;
+            if (c & i) {
+                bit = !bit;
+            }
+            crc <<= 1;
+            if (bit) {
+                crc ^= 0x04c11db7;
+            }
+        }
+    }
+    return crc;
+}
 
 /*
  * Just a little test message.  Go to http://192.168.4.1 in a web browser
@@ -40,9 +66,17 @@ void handleRoot() {
 // handle /config server call
 void handleConfig() {
     if (server.hasArg("interval")) {
-        // change led state according to value sent
-        bool change_to = server.arg("led") == "1";
         // TODO: write to memory
+        // Generate new data set for the struct
+        rtcData.interval = (uint32_t)server.arg("interval").toInt();
+        // Update CRC32 of data
+        rtcData.crc32 = calculateCRC32((uint32_t *)&rtcData.interval, sizeof(rtcData.interval));
+        // Write struct to RTC memory
+        if (ESP.rtcUserMemoryWrite(0, (uint32_t *)&rtcData, sizeof(rtcData))) {
+            Serial.println("Write: ");
+            Serial.println("rtcData.interval");
+            Serial.println(rtcData.interval);
+        }
         // response from server
         server.send(200, "text/plain", "updated!");
     } else {
@@ -54,7 +88,7 @@ void handleFinish() {
     digitalWrite(ledPinOn, LOW);
     digitalWrite(ledPinHasConnections, HIGH);
     server.send(200, "text/plain", "finishing...");
-    ESP.deepSleep(interval * 1000000);
+    ESP.deepSleep(rtcData.interval * 1000000);
 }
 
 // preinit() is called before system startup
@@ -70,6 +104,7 @@ void preinit() {
 }
 
 void setup() {
+    Serial.begin(115200);
     // setup led indicators
     pinMode(ledPinOn, OUTPUT);
     pinMode(ledPinHasConnections, OUTPUT);
@@ -78,6 +113,26 @@ void setup() {
 
     // wait a bit
     delay(2000);
+
+    // Read struct from RTC memory
+    if (ESP.rtcUserMemoryRead(0, (uint32_t *)&rtcData, sizeof(rtcData))) {
+        Serial.println("Read: ");
+        Serial.println();
+        uint32_t crcOfData = calculateCRC32((uint32_t *)&rtcData.interval, sizeof(rtcData.interval));
+        Serial.print("CRC32 of data: ");
+        Serial.println(crcOfData, HEX);
+        Serial.print("CRC32 read from RTC: ");
+        Serial.println(rtcData.crc32, HEX);
+        if (crcOfData != rtcData.crc32) {
+            Serial.println("CRC32 in RTC memory doesn't match CRC32 of data. Data is probably invalid!");
+            rtcData.interval = 5;
+        } else {
+            Serial.println("CRC32 check ok, data is probably valid.");
+            sleepIntervalSet = true;
+        }
+        Serial.println("rtcData.interval");
+        Serial.println(rtcData.interval);
+    }
 
     /**
      * if the reset reasons was the power on or the external reset
@@ -97,6 +152,7 @@ void setup() {
     } else if (ESP.getResetReason() == "Deep-Sleep Wake") {
         // TODO: do the work
         // load interval from memory
+        ESP.deepSleep(rtcData.interval * 1000000);
     }
 }
 
