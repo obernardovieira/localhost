@@ -7,3 +7,6 @@ But I realized that might be worth to have an oficial master, since that the mas
 
 ## TODO
 - [ ] https://thingpulse.com/esp8266-monitoring-power-consumption/
+
+## Fritzing
+* https://github.com/roman-minyaylov/nodemcu-v3-fritzing
